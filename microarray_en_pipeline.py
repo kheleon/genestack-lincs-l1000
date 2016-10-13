@@ -152,9 +152,9 @@ print [[k, len(grouped[k])] for k in grouped.keys()[0:25]]
 print "\nCollecting contrast info from source files..."
 
 contrast_values = {ma_file: all_marray_infos[ma_file].get(DOSE) + all_marray_infos[ma_file][DOSE_UNIT]
-                   if not all_marray_infos[ma_file][DOSE].startswith('n') else '0'
+                   if all_marray_infos[ma_file][DOSE]!='null' else '0'
                    for ma_file in all_marray_infos}
-
+### DOSE edited for GSF1968849, GSF1967775, GSF1968848
 links = {}
 norm_folder = fu.create_folder("Normalised files for L1000 data")
 norm_files_to_sources = {}
@@ -177,6 +177,7 @@ fu.unlink_files({norm_file: [created_files] for norm_file in links})
 created_files = fu.get_special_folder(SpecialFolders.CREATED)
 parent = fu.create_folder("Differential Expression For L1000", created_files)
 file_links = {}
+countNoDose = 0
 
 for i, norm_file in enumerate(norm_files_to_sources,1):
     try:
@@ -185,7 +186,6 @@ for i, norm_file in enumerate(norm_files_to_sources,1):
 
         source_files = norm_files_to_sources[norm_file]
         unique_contrasts = list(set(contrast_values.get(source) for source in source_files))
-        print unique_contrasts
         # group_mappings is a dict { unique_contrast_value -> index }
         group_mappings = {value: i for i, value in enumerate(unique_contrasts, 1)}
         group_names = ["Ungrouped"] + ["Group {0}".format(contrast) for contrast in unique_contrasts]
@@ -201,7 +201,13 @@ for i, norm_file in enumerate(norm_files_to_sources,1):
             if contrast == '0':
                 control_index = k
         if control_index is not None:
-            program_options['controlGroupOption'] = {'value': str(control_index)}
+            groupCounts = Counter([group_mappings[contrast_values[source]] for source in source_files])
+            if all(v>1 for v in groupCounts.values()):
+                program_options['controlGroupOption'] = {'value': str(control_index)}
+            else:
+                countNoDose += 1
+                fu.unlink_file(norm_file,  norm_folder)
+                continue
         params = {
             'organism': "Homo sapiens",
             'normalisedInputMode': True,
@@ -213,16 +219,10 @@ for i, norm_file in enumerate(norm_files_to_sources,1):
             'sourcesAccessions': [norm_file]
         }
         en_file = en.create_file(params)
-        print "groups=", group_names, "control index=", control_index, Counter([group_mappings[contrast_values[source]] for source in source_files])
         file_links[en_file] = [parent]
-        if control_index!=None:
-            groupCounts = Counter([group_mappings[contrast_values[source]] for source in source_files])
-            if all(v>1 for v in groupCounts.values()):
-                print "file=", norm_file, " contrasts=", unique_contrasts
-                print "groups=", group_names, "control index=", control_index, groupCounts
-                break
     except GenestackException as e:
         print "Received Genestack exception: {0}".format(e.message)
+print "There were {0} out of {1} files without NULL dose! ".format(countNoDose, len(norm_files_to_sources))
 print "\nMoving files..."
 fu.link_files(file_links)
 fu.unlink_files({key: [created_files] for key in file_links})
